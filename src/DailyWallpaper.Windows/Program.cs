@@ -3,12 +3,17 @@ namespace DailyWallpaper;
 internal static class Program
 {
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
         var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DailyWallpaper");
         try
         {
+            if (args is ["--enable-startup"] or ["--disable-startup"])
+            {
+                StartupRegistration.SetEnabled(Application.ExecutablePath, args[0] == "--enable-startup");
+                return;
+            }
             Directory.CreateDirectory(directory);
             FileStream instance;
             try

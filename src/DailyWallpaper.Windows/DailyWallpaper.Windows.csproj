@@ -9,4 +9,5 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../DailyWallpaper.Core/DailyWallpaper.Core.csproj" /></ItemGroup>
+  <ItemGroup><InternalsVisibleTo Include="DailyWallpaper.Windows.Tests" /></ItemGroup>
 </Project>

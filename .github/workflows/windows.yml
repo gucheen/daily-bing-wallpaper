@@ -13,7 +13,20 @@ jobs:
         with:
           python-version: '3.x'
       - run: python scripts/build.py --test
+      - name: Install Inno Setup
+        run: choco upgrade innosetup --version=6.7.3 --allow-downgrade --yes --no-progress
+      - run: python scripts/build.py --installer
+      - name: Test installer lifecycle
+        run: ./scripts/test_installer.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: DailyWallpaper-win-x64
           path: artifacts/win-x64/DailyWallpaper.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DailyWallpaper-win-x64-framework-dependent
+          path: artifacts/win-x64-framework-dependent/DailyWallpaper.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DailyWallpaper-win-x64-installer
+          path: artifacts/installer/DailyWallpaper-win-x64-Setup.exe

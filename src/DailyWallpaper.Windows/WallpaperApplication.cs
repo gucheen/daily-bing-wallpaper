@@ -5,14 +5,15 @@ namespace DailyWallpaper;
 
 internal sealed class WallpaperApplication : ApplicationContext
 {
-    private readonly Control dispatcher = new();
+    private readonly ShutdownWindow dispatcher = new();
     private readonly NotifyIcon tray;
     private readonly ContextMenuStrip menu = new();
     private readonly ToolStripMenuItem detail = new("正在加载壁纸…") { Enabled = false };
     private readonly ToolStripMenuItem mode = new() { Enabled = false };
     private readonly ToolStripMenuItem refresh = new("立即更新壁纸");
+    private readonly ToolStripMenuItem startup = new("登录时自动启动");
     private readonly System.Windows.Forms.Timer timer = new() { Interval = 60_000 };
-    private readonly HttpClient client = new() { Timeout = TimeSpan.FromSeconds(60) };
+    private readonly HttpClient client;
     private readonly CancellationTokenSource stopping = new();
     private readonly WallpaperStore store;
     private readonly string directory;
@@ -20,18 +21,24 @@ internal sealed class WallpaperApplication : ApplicationContext
     private bool updating;
     private bool needsRetry;
     private bool exiting;
+    private bool disposed;
     private bool applyFailed;
     private bool? lastAppliedDark;
     private DateTimeOffset retryAfter = DateTimeOffset.MinValue;
 
-    public WallpaperApplication(string directory)
+    public WallpaperApplication(string directory, HttpClient? client = null)
     {
         this.directory = directory;
-        store = new WallpaperStore(directory, new ImageRenderer(), client);
+        this.client = client ?? new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        store = new WallpaperStore(directory, new ImageRenderer(), this.client);
+        dispatcher.ExitRequested += ExitThread;
         _ = dispatcher.Handle;
         refresh.Click += (_, _) => Refresh();
         menu.Items.AddRange([detail, mode, new ToolStripSeparator(), refresh]);
         menu.Items.Add("打开壁纸目录", null, (_, _) => OpenDirectory());
+        startup.Click += (_, _) => ToggleStartup();
+        menu.Items.Add(startup);
+        menu.Opening += (_, _) => UpdateStartupMenu();
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("关于每日壁纸", null, (_, _) => MessageBox.Show(
             "每日壁纸 1.0.0\n每天 9:00 获取 Bing 壁纸，跟随 Windows 系统明暗模式。\n图片版权归原作者及相关权利方所有。", "关于每日壁纸"));
@@ -49,6 +56,7 @@ internal sealed class WallpaperApplication : ApplicationContext
         timer.Start();
         dispatcher.BeginInvoke(() =>
         {
+            if (exiting) return;
             current = store.Load();
             ApplyCurrent();
             Check();
@@ -148,6 +156,27 @@ internal sealed class WallpaperApplication : ApplicationContext
         catch (Exception e) { MessageBox.Show(e.Message, "无法打开壁纸目录"); }
     }
 
+    private void UpdateStartupMenu()
+    {
+        try { startup.Checked = StartupRegistration.IsEnabled(Application.ExecutablePath); }
+        catch (Exception e) { Log($"读取自启动设置失败：{e}"); }
+    }
+
+    private void ToggleStartup()
+    {
+        try
+        {
+            StartupRegistration.SetEnabled(Application.ExecutablePath,
+                !StartupRegistration.IsEnabled(Application.ExecutablePath));
+            UpdateStartupMenu();
+        }
+        catch (Exception e)
+        {
+            Log($"设置自启动失败：{e}");
+            MessageBox.Show(e.Message, "无法设置自启动", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
     private void Log(string message)
     {
         try { File.AppendAllText(Path.Combine(directory, "application.log"), $"[{DateTimeOffset.Now:O}] {message}{Environment.NewLine}"); }
@@ -156,19 +185,26 @@ internal sealed class WallpaperApplication : ApplicationContext
 
     protected override void ExitThreadCore()
     {
+        if (exiting) return;
+        Stop();
+        base.ExitThreadCore();
+    }
+
+    private void Stop()
+    {
+        if (exiting) return;
         exiting = true;
         stopping.Cancel();
         timer.Stop();
         tray.Visible = false;
-        base.ExitThreadCore();
     }
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
+        if (disposing && !disposed)
         {
-            exiting = true;
-            stopping.Cancel();
+            disposed = true;
+            Stop();
             SystemEvents.UserPreferenceChanged -= PreferencesChanged;
             SystemEvents.DisplaySettingsChanged -= WorkspaceChanged;
             SystemEvents.PowerModeChanged -= PowerChanged;

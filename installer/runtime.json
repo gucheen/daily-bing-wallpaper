@@ -1,0 +1,13 @@
+{
+  "version": "10.0.12",
+  "downloads": {
+    "win-x64": {
+      "url": "https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/10.0.12/windowsdesktop-runtime-10.0.12-win-x64.exe",
+      "sha256": "55a67d8476cde95a9cc43a95803b4f54446e7c9251ed22aa6421d4908174ae84"
+    },
+    "win-arm64": {
+      "url": "https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/10.0.12/windowsdesktop-runtime-10.0.12-win-arm64.exe",
+      "sha256": "50d2357a9b264bbf536150e85717aa19bdcf468b62193ef655f104dad15475d0"
+    }
+  }
+}
