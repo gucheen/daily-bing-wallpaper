@@ -19,13 +19,17 @@ if args.installer:
     if os.name != "nt":
         parser.error("--installer requires Windows and Inno Setup 6.7.3 or later")
     args.framework_dependent = True
-    candidates = [args.iscc, os.environ.get("ISCC"), shutil.which("ISCC.exe")]
+    configured_compiler = args.iscc or os.environ.get("ISCC")
+    if configured_compiler and not Path(configured_compiler).is_file():
+        parser.error(f"Configured Inno Setup compiler does not exist: {configured_compiler}")
+    candidates = [configured_compiler, shutil.which("ISCC.exe")]
     for variable in ("ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"):
         if base := os.environ.get(variable):
             candidates.append(str(Path(base) / ("Programs/Inno Setup 6" if variable == "LOCALAPPDATA" else "Inno Setup 6") / "ISCC.exe"))
     compiler = next((path for path in candidates if path and Path(path).is_file()), None)
     if compiler is None:
         parser.error("Install Inno Setup 6.7.3+ or pass --iscc PATH (https://jrsoftware.org/isdl.php)")
+    print(f"Inno Setup compiler: {compiler}", flush=True)
 output = ROOT / "artifacts" / (args.runtime + ("-framework-dependent" if args.framework_dependent else ""))
 
 def run(*command):

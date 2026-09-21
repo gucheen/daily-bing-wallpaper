@@ -1,11 +1,14 @@
 param([string]$Iscc)
 $ErrorActionPreference = 'Stop'
 if (-not $Iscc) {
-    $Iscc = @($env:ISCC, "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+    $Iscc = $env:ISCC
+}
+if (-not $Iscc) {
+    $Iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
         "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") |
         Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
 }
-if (-not $Iscc) { throw 'Inno Setup compiler not found; use -Iscc PATH' }
+if (-not $Iscc -or -not (Test-Path -LiteralPath $Iscc)) { throw 'Inno Setup compiler not found; use -Iscc PATH' }
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $testId = 'DWTest.' + [guid]::NewGuid().ToString('N')
 $testRoot = Join-Path $projectRoot "artifacts\$testId"
