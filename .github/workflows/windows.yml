@@ -1,0 +1,19 @@
+name: Windows build and tests
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: python scripts/build.py --test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DailyWallpaper-win-x64
+          path: artifacts/win-x64/DailyWallpaper.exe
