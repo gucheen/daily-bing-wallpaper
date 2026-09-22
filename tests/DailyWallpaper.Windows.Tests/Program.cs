@@ -11,6 +11,11 @@ internal static class TestProgram
             ShutdownTests.RunHost(lockedFile, testDirectory);
             return;
         }
+        if (args is ["--legacy-shutdown-host", var legacyFile, var legacyDirectory])
+        {
+            ShutdownTests.RunLegacyHost(legacyFile, legacyDirectory);
+            return;
+        }
 
         var renderer = new ImageRenderer();
         using var source = new Bitmap(64, 32);

@@ -54,8 +54,36 @@ try
     Assert(store.Load() == cached, "Cancellation preserves cache");
     handler.Metadata = JsonSerializer.SerializeToUtf8Bytes(wallpaper);
     handler.Image = original;
+    async Task ExpectPending(Wallpaper candidate)
+    {
+        handler.Metadata = JsonSerializer.SerializeToUtf8Bytes(candidate);
+        try { await store.FetchAsync(At(22,9), CancellationToken.None); throw new Exception("Unchanged wallpaper accepted"); }
+        catch (WallpaperNotUpdatedException) { }
+        Assert(store.Load() == cached, "Pending update preserves cache and refresh timestamp");
+        Assert(Directory.GetFiles(directory).Length == 3, "Pending update must not create image files");
+    }
+    await ExpectPending(wallpaper);
+    Assert(handler.Count == 1, "Stale date must skip image download");
+    foreach (var invalidDate in new[] { "invalid", "2026-02-30", "2026-09-23", "" })
+    {
+        var count = handler.Count;
+        handler.Metadata = JsonSerializer.SerializeToUtf8Bytes(wallpaper with { Date = invalidDate });
+        try { await store.FetchAsync(At(22,9), CancellationToken.None); throw new Exception("Invalid date accepted"); }
+        catch (InvalidDataException) { }
+        Assert(handler.Count == count + 1 && store.Load() == cached, "Invalid date skips image and preserves cache");
+    }
+    var next = wallpaper with { Date = "2026-09-22", Url = new Uri("https://example.com/renamed.png") };
+    await ExpectPending(next);
+    // A new URL is not proof of new image content; an unchanged URL may serve a new image.
+    next = next with { Url = wallpaper.Url };
+    handler.Metadata = JsonSerializer.SerializeToUtf8Bytes(next);
+    handler.Image = Encoding.UTF8.GetBytes("new image content");
+    var beforeFetch = handler.Count;
     var fetched = await store.FetchAsync(At(22,9), CancellationToken.None);
-    Assert(handler.Count == 2 && store.Load() == fetched, "Metadata and image fetch");
+    Assert(handler.Count == beforeFetch + 2 && store.Load() == fetched && fetched != cached, "New date and image accepted even with same URL");
+    beforeFetch = handler.Count;
+    var repeated = await store.FetchAsync(At(22,10), CancellationToken.None);
+    Assert(handler.Count == beforeFetch + 1 && repeated == fetched, "Same date skips image download and preserves refresh timestamp");
     handler.Fail = true;
     try { await store.FetchAsync(At(23,9), CancellationToken.None); throw new Exception("HTTP error accepted"); }
     catch (HttpRequestException) { }
@@ -66,7 +94,7 @@ try
     Assert(store.Load() is null, "Corrupt manifest rejects cache");
     File.WriteAllText(Path.Combine(directory,"current.json"), JsonSerializer.Serialize(cached with { OriginalName = "../outside.jpg" }));
     Assert(store.Load() is null, "Manifest traversal rejected");
-    Console.WriteLine("PASS: scheduling, time zones, tone mapping, cache, original preservation, cancellation, HTTP failures, path validation");
+    Console.WriteLine("PASS: scheduling, time zones, tone mapping, cache, date validation, duplicate images, original preservation, cancellation, HTTP failures, path validation");
 }
 finally { Directory.Delete(directory, true); }
 

@@ -44,6 +44,17 @@ internal static class ShutdownTests
         File.WriteAllText(Path.Combine(directory, "stopped"), "graceful shutdown");
     }
 
+    // Simulate an old tray process that acknowledges shutdown but keeps its
+    // message loop and the installed executable alive.
+    internal static void RunLegacyHost(string lockedFile, string directory)
+    {
+        using var file = new FileStream(lockedFile, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var window = new ShutdownWindow();
+        _ = window.Handle;
+        window.BeginInvoke(() => File.WriteAllText(Path.Combine(directory, "legacy-ready"), "idle"));
+        Application.Run();
+    }
+
     private sealed class PendingDownload(string directory) : HttpMessageHandler
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)

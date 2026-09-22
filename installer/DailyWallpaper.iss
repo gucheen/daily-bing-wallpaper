@@ -29,7 +29,10 @@ UninstallDisplayIcon={app}\DailyWallpaper.exe
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-CloseApplications=yes
+; Older releases can leave a hidden process alive after session shutdown.
+; Let Restart Manager terminate it if graceful shutdown does not finish.
+CloseApplications=force
+CloseApplicationsFilter=DailyWallpaper.exe
 RestartApplications=no
 
 [Languages]

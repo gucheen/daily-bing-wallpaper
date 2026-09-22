@@ -34,12 +34,12 @@ function Build-TestInstaller([string]$Architecture, [string]$Name) {
     Assert-True ($LASTEXITCODE -eq 0) 'Test installer compilation failed'
 }
 
-function Invoke-Setup([string]$Exe, [string[]]$Options, [bool]$ExpectSuccess = $true) {
+function Invoke-Setup([string]$Exe, [string[]]$Options, [bool]$ExpectSuccess = $true, [int]$TimeoutSeconds = 30) {
     Write-Output "Testing: $Exe $Options"
     $process = Start-Process -FilePath $Exe -ArgumentList $Options -WindowStyle Hidden -PassThru
-    if (-not $process.WaitForExit(30000)) {
+    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
         & taskkill /PID $process.Id /T /F | Out-Null
-        throw 'Installer did not finish within 30 seconds'
+        throw "Installer did not finish within $TimeoutSeconds seconds"
     }
     if ($ExpectSuccess) { Assert-True ($process.ExitCode -eq 0) "Installer failed: $Exe (exit $($process.ExitCode))" }
     else { Assert-True ($process.ExitCode -ne 0) 'Missing runtime should stop unattended installation' }
@@ -74,7 +74,7 @@ try {
     Assert-True (Test-Path $uninstallKey) 'Uninstall registration missing'
     Assert-True ((Get-Content "$testRoot\install.log" -Raw) -match 'download skipped') 'Installed runtime was not detected'
 
-    & dotnet build (Join-Path $projectRoot 'tests\DailyWallpaper.Windows.Tests') -c Release
+    & dotnet build (Join-Path $projectRoot 'tests\DailyWallpaper.Windows.Tests') -c Release --no-restore --disable-build-servers -m:1
     Assert-True ($LASTEXITCODE -eq 0) 'Shutdown test host build failed'
     $hostExe = Join-Path $projectRoot 'tests\DailyWallpaper.Windows.Tests\bin\Release\net10.0-windows\DailyWallpaper.Windows.Tests.exe'
     $shutdownHost = Start-Process -FilePath $hostExe -ArgumentList @('--shutdown-host',
@@ -91,6 +91,18 @@ try {
     Assert-True (Test-Path "$testRoot\cancelled") 'Shutdown did not cancel the active download'
     Assert-True (Test-Path "$testRoot\stopped") 'Installer did not close the application gracefully'
 
+    $shutdownHost.Dispose()
+    $shutdownHost = Start-Process -FilePath $hostExe -ArgumentList @('--legacy-shutdown-host',
+        ('"' + (Join-Path $installDirectory 'DailyWallpaper.exe') + '"'), ('"' + $testRoot + '"')) -WindowStyle Hidden -PassThru
+    $readyTimer.Restart()
+    while (-not (Test-Path "$testRoot\legacy-ready") -and -not $shutdownHost.HasExited -and $readyTimer.Elapsed.TotalSeconds -lt 15) {
+        Start-Sleep -Milliseconds 100
+    }
+    Assert-True ((Test-Path "$testRoot\legacy-ready") -and -not $shutdownHost.HasExited) 'Legacy application context did not start'
+    Invoke-Setup $setup ($quiet + @("/DIR=`"$installDirectory`"", '/TASKS=startup',
+        '/CLOSEAPPLICATIONS', '/RESTARTEXITCODE=3010', "/LOG=`"$testRoot\legacy-upgrade.log`"")) $true 90
+    Assert-True ($shutdownHost.WaitForExit(5000)) 'Legacy process remained alive after upgrade'
+
     Invoke-Setup $setup ($quiet + @("/DIR=`"$installDirectory`"", '/TASKS=!startup'))
     Assert-True ($null -eq (Get-TestStartup)) 'Unchecking startup on upgrade did not remove it'
     Invoke-Setup $setup ($quiet + @("/DIR=`"$installDirectory`"", '/TASKS=startup'))
@@ -106,7 +118,7 @@ try {
     Set-ItemProperty -LiteralPath $startupKey -Name $testId -Value $otherInstallation
     Invoke-Setup $uninstaller $quiet
     Assert-True ((Get-TestStartup) -eq $otherInstallation) 'Uninstall removed another installation startup entry'
-    Write-Output 'PASS: missing-runtime refusal, runtime detection, running upgrade with graceful shutdown and download cancellation, startup selection, uninstall, other-installation preservation'
+    Write-Output 'PASS: missing-runtime refusal, runtime detection, graceful shutdown and download cancellation, legacy process shutdown fallback, startup selection, uninstall, other-installation preservation'
 } finally {
     try {
         if ($shutdownHost -and -not $shutdownHost.HasExited) { Stop-Process -Id $shutdownHost.Id -Force }

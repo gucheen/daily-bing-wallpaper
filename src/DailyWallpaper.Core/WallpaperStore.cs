@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -24,6 +25,8 @@ public interface IImageRenderer
     byte[] CreateDarkJpeg(byte[] original);
     bool IsValid(string path);
 }
+
+public sealed class WallpaperNotUpdatedException(string message) : Exception(message);
 
 public static class Schedule
 {
@@ -97,7 +100,29 @@ public sealed class WallpaperStore(string directory, IImageRenderer renderer, Ht
         var wallpaper = JsonSerializer.Deserialize<Wallpaper>(metadata) ?? throw new InvalidDataException("壁纸信息为空");
         if (wallpaper.Url is null || !wallpaper.Url.IsAbsoluteUri || wallpaper.Url.Scheme != "https")
             throw new InvalidDataException("壁纸地址必须使用 HTTPS");
+        if (!DateOnly.TryParseExact(wallpaper.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out var published))
+            throw new InvalidDataException("壁纸日期无效");
+        var today = DateOnly.FromDateTime(now.LocalDateTime);
+        if (published > today)
+            throw new InvalidDataException("壁纸日期晚于今天");
+        if (published < today)
+            throw new WallpaperNotUpdatedException($"服务端尚未提供今日壁纸：{wallpaper.Date}");
+        var current = Load();
+        if (current is not null && DateOnly.TryParseExact(current.Wallpaper.Date, "yyyy-MM-dd",
+                CultureInfo.InvariantCulture, DateTimeStyles.None, out var previous))
+        {
+            if (published < previous)
+                throw new WallpaperNotUpdatedException("服务端壁纸日期早于本地缓存");
+            if (published == previous) return current;
+        }
         var original = await DownloadAsync(wallpaper.Url, cancellation);
+        if (current is not null)
+        {
+            var previousImage = await File.ReadAllBytesAsync(current.ImagePath(directory, false), cancellation);
+            if (SHA256.HashData(original).AsSpan().SequenceEqual(SHA256.HashData(previousImage)))
+                throw new WallpaperNotUpdatedException("壁纸日期已更新，但图片内容尚未变化");
+        }
         return await Task.Run(() => Prepare(wallpaper, original, now, cancellation), cancellation);
     }
 
