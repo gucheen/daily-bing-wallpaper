@@ -104,8 +104,7 @@ public sealed class WallpaperStore(string directory, IImageRenderer renderer, Ht
                 DateTimeStyles.None, out var published))
             throw new InvalidDataException("壁纸日期无效");
         var today = DateOnly.FromDateTime(now.LocalDateTime);
-        if (published > today)
-            throw new InvalidDataException("壁纸日期晚于今天");
+        // Bing 可能提前上线图片，允许服务端日期晚于本地今天。
         if (published < today)
             throw new WallpaperNotUpdatedException($"服务端尚未提供今日壁纸：{wallpaper.Date}");
         var current = Load();

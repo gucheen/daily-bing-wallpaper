@@ -64,7 +64,7 @@ try
     }
     await ExpectPending(wallpaper);
     Assert(handler.Count == 1, "Stale date must skip image download");
-    foreach (var invalidDate in new[] { "invalid", "2026-02-30", "2026-09-23", "" })
+    foreach (var invalidDate in new[] { "invalid", "2026-02-30", "" })
     {
         var count = handler.Count;
         handler.Metadata = JsonSerializer.SerializeToUtf8Bytes(wallpaper with { Date = invalidDate });
@@ -84,6 +84,21 @@ try
     beforeFetch = handler.Count;
     var repeated = await store.FetchAsync(At(22,10), CancellationToken.None);
     Assert(handler.Count == beforeFetch + 1 && repeated == fetched, "Same date skips image download and preserves refresh timestamp");
+    handler.Metadata = JsonSerializer.SerializeToUtf8Bytes(next with { Date = "2026-09-24" });
+    handler.Image = Encoding.UTF8.GetBytes("early release image content");
+    beforeFetch = handler.Count;
+    fetched = await store.FetchAsync(At(23,22), CancellationToken.None);
+    Assert(handler.Count == beforeFetch + 2 && store.Load() == fetched && fetched.Wallpaper.Date == "2026-09-24",
+        "Early release is downloaded and cached with its published date");
+    Assert(fetched.RefreshedAt == At(23,22), "Early release retains actual refresh time");
+    beforeFetch = handler.Count;
+    repeated = await store.FetchAsync(At(23,23), CancellationToken.None);
+    Assert(handler.Count == beforeFetch + 1 && repeated == fetched, "Repeated future date skips image download");
+    handler.Metadata = JsonSerializer.SerializeToUtf8Bytes(next with { Date = "2026-09-23" });
+    beforeFetch = handler.Count;
+    try { await store.FetchAsync(At(23,23), CancellationToken.None); throw new Exception("Date rollback accepted"); }
+    catch (WallpaperNotUpdatedException) { }
+    Assert(handler.Count == beforeFetch + 1 && store.Load() == fetched, "Earlier server date preserves early release cache");
     handler.Fail = true;
     try { await store.FetchAsync(At(23,9), CancellationToken.None); throw new Exception("HTTP error accepted"); }
     catch (HttpRequestException) { }
