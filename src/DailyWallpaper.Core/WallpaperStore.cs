@@ -69,6 +69,8 @@ public static class DarkTone
 
 public sealed class WallpaperStore(string directory, IImageRenderer renderer, HttpClient client)
 {
+    public const int MaxCachedWallpapers = 30;
+    public const long MaxCacheBytes = 200L * 1024 * 1024;
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
     public string DirectoryPath => directory;
     private string Manifest => Path.Combine(directory, "current.json");
@@ -80,8 +82,10 @@ public sealed class WallpaperStore(string directory, IImageRenderer renderer, Ht
             var cached = JsonSerializer.Deserialize<CachedWallpaper>(File.ReadAllBytes(Manifest), Json);
             if (cached?.Wallpaper?.Url is null || !SafeName(cached.OriginalName) || !SafeName(cached.DarkName))
                 return null;
-            return renderer.IsValid(cached.ImagePath(directory, false)) &&
-                renderer.IsValid(cached.ImagePath(directory, true)) ? cached : null;
+            if (!renderer.IsValid(cached.ImagePath(directory, false)) ||
+                !renderer.IsValid(cached.ImagePath(directory, true))) return null;
+            Cleanup(cached);
+            return cached;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
         {
@@ -156,7 +160,6 @@ public sealed class WallpaperStore(string directory, IImageRenderer renderer, Ht
                 File.Move(temporary, Manifest, true);
             }
             finally { if (File.Exists(temporary)) File.Delete(temporary); }
-            return cached;
         }
         catch
         {
@@ -164,5 +167,57 @@ public sealed class WallpaperStore(string directory, IImageRenderer renderer, Ht
                 try { File.Delete(path); } catch (IOException) { }
             throw;
         }
+        Cleanup(cached);
+        return cached;
     }
+
+    private void Cleanup(CachedWallpaper current)
+    {
+        try
+        {
+            // 只处理本应用生成的图片；按组清理，保留当前清单引用的原图和深色图。
+            var groups = new DirectoryInfo(directory).EnumerateFiles()
+                .Where(file => IsCacheImage(file.Name))
+                .GroupBy(file => file.Name[..32], StringComparer.OrdinalIgnoreCase)
+                .Select(group => new
+                {
+                    Files = group.ToArray(),
+                    Bytes = group.Sum(file => file.Length),
+                    Updated = group.Max(file => file.LastWriteTimeUtc),
+                    Protected = group.Any(file =>
+                        file.Name.Equals(current.OriginalName, StringComparison.OrdinalIgnoreCase) ||
+                        file.Name.Equals(current.DarkName, StringComparison.OrdinalIgnoreCase))
+                })
+                .OrderBy(group => group.Updated).ToArray();
+            var count = groups.Length;
+            var bytes = groups.Sum(group => group.Bytes);
+            foreach (var group in groups)
+            {
+                if (count <= MaxCachedWallpapers && bytes <= MaxCacheBytes) break;
+                if (group.Protected) continue;
+                var deleted = true;
+                foreach (var file in group.Files)
+                {
+                    try
+                    {
+                        var length = file.Length;
+                        file.Delete();
+                        bytes -= length;
+                    }
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException) { deleted = false; }
+                }
+                if (deleted) count--;
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // 文件被占用或暂时无权限时，下次加载或保存缓存再尝试。
+        }
+    }
+
+    private static bool IsCacheImage(string name) => name.Length > 32 &&
+        Guid.TryParseExact(name[..32], "N", out _) &&
+        (name[32..].Equals("-original.jpg", StringComparison.OrdinalIgnoreCase) ||
+         name[32..].Equals("-original.png", StringComparison.OrdinalIgnoreCase) ||
+         name[32..].Equals("-dark.jpg", StringComparison.OrdinalIgnoreCase));
 }

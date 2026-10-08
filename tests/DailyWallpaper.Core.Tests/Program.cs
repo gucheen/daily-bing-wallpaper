@@ -113,6 +113,8 @@ try
 }
 finally { Directory.Delete(directory, true); }
 
+CacheTests.Run();
+
 sealed class FakeRenderer : IImageRenderer
 {
     public bool Reject;
